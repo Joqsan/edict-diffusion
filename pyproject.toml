@@ -8,6 +8,8 @@ packages = [{include = "edict_diffusion"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
+torch = "^1.13.1"
+numpy = "^1.24.2"
 
 
 [tool.poetry.group.dev.dependencies]
