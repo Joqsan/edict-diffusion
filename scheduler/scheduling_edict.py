@@ -51,9 +51,9 @@ class EDICTScheduler:
         )
         self.timesteps = torch.from_numpy(timesteps).to(device)
 
-        self.do_dilation_now = False
+        self.do_mixing_now = False
 
-    # Start with self.do_dilation_step = False
+    # Start with self.do_mixing_now = False
     def denoise_step(self, base, model_input, model_output, t):
         # no skipped timesteps
         t_prev = t - self.step_ratio
@@ -62,14 +62,14 @@ class EDICTScheduler:
 
         next_model_input = a_t * base + b_t * model_output
 
-        if not self.do_dilation_now:
+        if not self.do_mixing_now:
             # It implies we just did equation (14.1) --> next_model_input = x_t_inter
-            self.do_dilation_now ^= True
+            self.do_mixing_now ^= True
             return model_input, next_model_input
         else:
             # It implies we just did equation (14.2) --> next_model_input = y_t_inter
             # Do equation (14.3)
-            self.do_dilation_now ^= True
+            self.do_mixing_now ^= True
             return self._forward_mixin_step(model_input, next_model_input)
 
     def _forward_mixin_step(self, x, y):
@@ -78,12 +78,12 @@ class EDICTScheduler:
 
         return x_prev, y_prev
 
-    # Start with self.do_dilation_step = True
+    # Start with self.do_mixing_now = True
     def noise_step(self, base, model_input, model_output, t):
-        if self.do_dilation_now:
+        if self.do_mixing_now:
             base, model_input = self._inverse_mixing_step(base, model_input)
 
-        self.do_dilation_now ^= True
+        self.do_mixing_now ^= True
 
         t_prev = t - self.step_ratio
         a_t = self.sqrt_alphas_cumprod[t_prev] / self.sqrt_alphas_cumprod[t]
