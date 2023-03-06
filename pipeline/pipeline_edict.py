@@ -6,41 +6,39 @@ from diffusers import AutoencoderKL, UNet2DConditionModel
 from transformers import CLIPTextModel, CLIPTokenizer
 
 from scheduler.scheduling_edict import EDICTScheduler
-from utils import auth_token, preprocess
+from utils import preprocess
 
 # Getting our HF Auth token
 with open("hf_auth", "r") as f:
     auth_token = f.readlines()[0].strip()
 
 clip_filepath = "openai/clip-vit-large-patch14"
-tokenizer = CLIPTokenizer.from_pretrained(clip_filepath)
-text_encoder = CLIPTextModel.from_pretrained(clip_filepath, torch_dtype=torch.float16)
 
 
 dm_filepath = "CompVis/stable-diffusion-v1-4"
 
-unet = UNet2DConditionModel.from_pretrained(
-    dm_filepath,
-    subfolder="unet",
-    use_auth_token=auth_token,
-    revision="fp16",
-    torch_dtype=torch.float16,
-)
-vae = AutoencoderKL.from_pretrained(
-    dm_filepath,
-    subfolder="vae",
-    use_auth_token=auth_token,
-    revision="fp16",
-    torch_dtype=torch.float16,
-)
-
 
 class Pipeline:
     def __init__(self) -> None:
-        self.vae = vae
-        self.text_encoder = text_encoder
-        self.tokenizer = tokenizer
-        self.unet = unet
+        self.tokenizer = CLIPTokenizer.from_pretrained(clip_filepath)
+        self.text_encoder = CLIPTextModel.from_pretrained(
+            clip_filepath, torch_dtype=torch.float16
+        )
+
+        self.unet = UNet2DConditionModel.from_pretrained(
+            dm_filepath,
+            subfolder="unet",
+            use_auth_token=auth_token,
+            revision="fp16",
+            torch_dtype=torch.float16,
+        )
+        self.vae = AutoencoderKL.from_pretrained(
+            dm_filepath,
+            subfolder="vae",
+            use_auth_token=auth_token,
+            revision="fp16",
+            torch_dtype=torch.float16,
+        )
         self.scheduler = EDICTScheduler()
 
     def _encode(self, prompt, max_length, device):
@@ -106,37 +104,36 @@ class Pipeline:
 
         return base, model_input
 
-
     def __call__(
-            self,
-            image: Union[torch.Tensor, Image.Image],
-            prompt_base: str,
-            prompt_target: str,
-            strength: float,
-            negative_prompt: str,
-            device: str,
-            num_inference_steps: int,
-            guidance_scale: float,
-            generator,
-            dtype,
-        ):
-            do_classifier_free_guidance = True
+        self,
+        image: Union[torch.Tensor, Image.Image],
+        prompt_base: str,
+        prompt_target: str,
+        strength: float,
+        negative_prompt: str,
+        device: str,
+        num_inference_steps: int,
+        guidance_scale: float,
+        generator,
+        dtype,
+    ):
+        do_classifier_free_guidance = True
 
-            base_emb = self._encode_prompt(
-                prompt_base, negative_prompt, device, do_classifier_free_guidance=True
-            )
+        base_emb = self._encode_prompt(
+            prompt_base, negative_prompt, device, do_classifier_free_guidance=True
+        )
 
-            target_emb = self._encode_prompt(
-                prompt_target, negative_prompt, device, do_classifier_free_guidance=False
-            )
+        target_emb = self._encode_prompt(
+            prompt_target, negative_prompt, device, do_classifier_free_guidance=False
+        )
 
-            image = preprocess(image)
+        image = preprocess(image)
 
-            num_effective_steps = strength * num_inference_steps
-            self.scheduler.set_timesteps(num_effective_steps, device=device)
+        num_effective_steps = strength * num_inference_steps
+        self.scheduler.set_timesteps(num_effective_steps, device=device)
 
-            # do noising steps
-            # last iteration returns: y_t, x_t
-            model_input, base = self.prepare_latents(
-                image, base_emb, device, generator, dtype
-            )
+        # do noising steps
+        # last iteration returns: y_t, x_t
+        model_input, base = self.prepare_latents(
+            image, base_emb, device, generator, dtype
+        )
