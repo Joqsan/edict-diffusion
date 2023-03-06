@@ -29,8 +29,10 @@ class EDICTScheduler:
         self.sqrt_betas_cumprod = torch.sqrt(1 - alphas_cumprod)
         self.sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod)
 
+        self.num_train_timesteps = num_train_timesteps
         self.num_inference_steps = None
         self.step_ratio = None
+        self.do_mixing_now = None
         self.timesteps = torch.from_numpy(
             np.arange(0, num_train_timesteps)[::-1].copy().astype(np.int64)
         )
@@ -42,7 +44,7 @@ class EDICTScheduler:
         **kwargs
     ):
         self.num_inference_steps = num_inference_steps
-        self.step_ratio = self.config.num_train_timesteps // self.num_inference_steps
+        self.step_ratio = self.num_train_timesteps // self.num_inference_steps
 
         timesteps = (
             (np.arange(0, num_inference_steps) * self.step_ratio)
@@ -53,7 +55,7 @@ class EDICTScheduler:
         self.timesteps = torch.from_numpy(timesteps).repeat_interleave(2)
         self.timesteps = self.timesteps.to(device)
 
-        self.do_mixing_now = False
+        self.do_mixing_now = True
 
     # Start with self.do_mixing_now = False
     def denoise_step(self, base, model_input, model_output, t):
