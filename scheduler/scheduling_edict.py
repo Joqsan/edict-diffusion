@@ -1,6 +1,7 @@
-import torch
-import numpy as np
 from typing import Union
+
+import numpy as np
+import torch
 
 
 class EDICTScheduler:
@@ -49,7 +50,8 @@ class EDICTScheduler:
             .copy()
             .astype(np.int64)
         )
-        self.timesteps = torch.from_numpy(timesteps).to(device)
+        self.timesteps = torch.from_numpy(timesteps).repeat_interleave(2)
+        self.timesteps = self.timesteps.to(device)
 
         self.do_mixing_now = False
 
@@ -70,9 +72,9 @@ class EDICTScheduler:
             # It implies we just did equation (14.2) --> next_model_input = y_t_inter
             # Do equation (14.3)
             self.do_mixing_now ^= True
-            return self._forward_mixin_step(model_input, next_model_input)
+            return self._forward_mixing_step(model_input, next_model_input)
 
-    def _forward_mixin_step(self, x, y):
+    def _forward_mixing_step(self, x, y):
         x_prev = self.p * x + (1 - self.p) * y
         y_prev = self.p * y + (1 - self.p) * x_prev
 
@@ -80,20 +82,17 @@ class EDICTScheduler:
 
     # Start with self.do_mixing_now = True
     def noise_step(self, base, model_input, model_output, t):
-        if self.do_mixing_now:
-            base, model_input = self._inverse_mixing_step(base, model_input)
-
-        self.do_mixing_now ^= True
-
         t_prev = t - self.step_ratio
         a_t = self.sqrt_alphas_cumprod[t_prev] / self.sqrt_alphas_cumprod[t]
         b_t = -a_t * self.sqrt_betas_cumprod[t] + self.sqrt_betas_cumprod[t_prev]
 
         next_model_input = (base - b_t * model_output) / a_t
 
+        self.do_mixing_now ^= True
+
         return model_input, next_model_input
 
-    def _inverse_mixing_step(self, base, model_input):
+    def inverse_mixing_step(self, base, model_input):
         base = (base - (1 - self.p) * model_input) / self.p
         model_input = (model_input - (1 - self.p) * base) / self.p
 
