@@ -18,7 +18,7 @@ class EDICTScheduler:
 
         betas = (
             torch.linspace(
-                beta_1**0.5, beta_T**0.5, num_train_timesteps, dtype=torch.float32
+                beta_1**0.5, beta_T**0.5, num_train_timesteps+1, dtype=torch.float32
             )
             ** 2
         )
@@ -33,9 +33,7 @@ class EDICTScheduler:
         self.num_inference_steps = None
         self.step_ratio = None
         self.do_mixing_now = None
-        self.timesteps = torch.from_numpy(
-            np.arange(0, num_train_timesteps)[::-1].copy().astype(np.int64)
-        )
+        self.fwd_timesteps = None
 
     def set_timesteps(
         self,
@@ -46,14 +44,9 @@ class EDICTScheduler:
         self.num_inference_steps = num_inference_steps
         self.step_ratio = self.num_train_timesteps // self.num_inference_steps
 
-        timesteps = (
-            (np.arange(0, num_inference_steps) * self.step_ratio)
-            .round()[::-1]
-            .copy()
-            .astype(np.int64)
-        )
-        self.timesteps = torch.from_numpy(timesteps).repeat_interleave(2)
-        self.timesteps = self.timesteps.to(device)
+        fwd_timesteps = (np.arange(1, num_inference_steps+1) * self.step_ratio).astype(np.int64)
+        self.fwd_timesteps = torch.from_numpy(fwd_timesteps).repeat_interleave(2)
+        self.fwd_timesteps = self.fwd_timesteps.to(device)
 
         self.do_mixing_now = True
 

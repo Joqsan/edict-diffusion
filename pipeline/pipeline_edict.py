@@ -85,6 +85,7 @@ class Pipeline:
 
         return text_emb
 
+    @torch.no_grad()
     def prepare_latents(self, image, text_emb, do_classifier_free_guidance, guidance_scale, device, generator, dtype):
         image = image.to(device=device, dtype=self.vae.dtype)
         init_latents = self.vae.encode(image).latent_dist.sample(generator)
@@ -92,17 +93,17 @@ class Pipeline:
 
         model_input, base = init_latents, init_latents.clone()
 
-        for t in self.scheduler.timesteps:
+        for i, t in enumerate(self.scheduler.fwd_timesteps):
             if self.scheduler.do_mixing_now:
                 base, model_input = self.scheduler.inverse_mixing_step(
                     base, model_input
                 )
 
-            model_input = torch.cat([model_input] * 2) if do_classifier_free_guidance else model_input
+            latent_model_input = torch.cat([model_input] * 2) if do_classifier_free_guidance else model_input
 
             # predict the noise residual
             noise_pred = self.unet(
-                model_input, t, encoder_hidden_states=text_emb
+                latent_model_input, t, encoder_hidden_states=text_emb
             ).sample
 
             if do_classifier_free_guidance:
@@ -115,6 +116,7 @@ class Pipeline:
 
         return base, model_input
 
+    @torch.no_grad()
     def __call__(
         self,
         image: Union[torch.Tensor, Image.Image],
@@ -142,7 +144,7 @@ class Pipeline:
 
         image = preprocess(image)
 
-        num_effective_steps = strength * num_inference_steps
+        num_effective_steps = int(strength * num_inference_steps)
         self.scheduler.set_timesteps(num_effective_steps, device=device)
 
         # do noising steps
