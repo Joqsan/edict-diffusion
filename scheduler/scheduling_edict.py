@@ -9,7 +9,7 @@ class EDICTScheduler:
         self,
         beta_1=0.00085,
         beta_T=0.012,
-        p=0.75,
+        p=0.93,
         eta=0.0,
         num_train_timesteps=1000,
     ) -> None:
@@ -23,11 +23,11 @@ class EDICTScheduler:
             ** 2
         )
 
-        alphas = 1.0 - betas
-        alphas_cumprod = torch.cumprod(alphas, dim=0)
+        self.alphas = 1.0 - betas
+        self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
 
-        self.sqrt_betas_cumprod = torch.sqrt(1 - alphas_cumprod)
-        self.sqrt_alphas_cumprod = torch.sqrt(alphas_cumprod)
+        self.sqrt_betas_cumprod = torch.sqrt(1 - self.alphas_cumprod)
+        self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
 
         self.num_train_timesteps = num_train_timesteps
         self.num_inference_steps = None
@@ -67,7 +67,7 @@ class EDICTScheduler:
             # It implies we just did equation (14.2) --> next_model_input = y_t_inter
             # Do equation (14.3)
             self.do_mixing_now ^= True
-            return self._forward_mixing_step(model_input, next_model_input)
+            return self._forward_mixing_step(x=model_input, y=next_model_input)
 
     def _forward_mixing_step(self, x, y):
         x_prev = self.p * x + (1 - self.p) * y

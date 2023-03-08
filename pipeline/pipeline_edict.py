@@ -126,7 +126,7 @@ class Pipeline:
         negative_prompt: str = None,
         device: str = 'cuda',
         num_inference_steps: int = 50,
-        guidance_scale: float = 7.0,
+        guidance_scale: float = 3.0,
         dtype=torch.float64,
     ):
         
@@ -152,3 +152,22 @@ class Pipeline:
         model_input, base = self.prepare_latents(
             image, base_emb, do_classifier_free_guidance, guidance_scale, device, generator, dtype
         )
+
+        bwd_timesteps = self.scheduler.fwd_timesteps.flip(0)
+        self.scheduler.do_mixing_now = False
+
+        for i, t in enumerate(bwd_timesteps):
+
+            latent_model_input = torch.cat([model_input] * 2) if do_classifier_free_guidance else model_input
+
+            noise_pred = self.unet(latent_model_input, t, encoder_hidden_states=target_emb).sample
+
+            if do_classifier_free_guidance:
+                    noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                    noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+            
+            base, model_input = self.scheduler.denoise_step(base, model_input, noise_pred, t)
+        
+        
+
+       
