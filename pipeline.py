@@ -5,11 +5,6 @@ from PIL import Image
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
 
-from scheduling import EDICTScheduler
-
-model_path_clip = "openai/clip-vit-large-patch14"
-model_path_diffusion = "CompVis/stable-diffusion-v1-4"
-
 
 def preprocess(image):
     if isinstance(image, Image.Image):
@@ -25,39 +20,38 @@ def preprocess(image):
         raise TypeError("Expected object of type PIL.Image.Image")
     return image
 
-
 class Pipeline:
-    def __init__(self, leapfrog_steps=True, device="cuda") -> None:
-        
+    def __init__(
+            self,
+            scheduler,
+            clip_path="openai/clip-vit-large-patch14",
+            sd_path="CompVis/stable-diffusion-v1-4",
+            revision="fp16",
+            torch_dtype=torch.float16,
+            leapfrog_steps=True,
+            device="cuda"
+            
+    ) -> None:
+        self.scheduler = scheduler
         self.leapfrog_steps = leapfrog_steps
         self.device = device
-
-        self.scheduler = EDICTScheduler(
-            p=0.93,
-            beta_1=0.00085,
-            beta_T=0.012,
-            num_train_timesteps=1000
-        )
         
         self.unet = UNet2DConditionModel.from_pretrained(
-            model_path_diffusion,
+            sd_path,
             subfolder="unet",
-            revision="fp16",
-            torch_dtype=torch.float16,
-        ).double().to(device)
+            revision=revision,
+            torch_dtype=torch_dtype,
+        ).to(device)
         
         self.vae = AutoencoderKL.from_pretrained(
-            model_path_diffusion,
+            sd_path,
             subfolder="vae",
-            revision="fp16",
-            torch_dtype=torch.float16,
-        ).double().to(device)
+            revision=revision,
+            torch_dtype=torch_dtype,
+        ).to(device)
 
-        self.tokenizer = CLIPTokenizer.from_pretrained(model_path_clip)
-        self.encoder = CLIPTextModel.from_pretrained(
-            model_path_clip,
-            torch_dtype=torch.float16
-        ).double().to(device)
+        self.tokenizer = CLIPTokenizer.from_pretrained(clip_path)
+        self.encoder = CLIPTextModel.from_pretrained(clip_path, torch_dtype=torch_dtype).to(device)
 
 
     def encode_prompt(self, prompt, negative_prompt=None):
@@ -107,10 +101,10 @@ class Pipeline:
         # init_latents = self.vae.config.scaling_factor * init_latents
         latent = 0.18215 * latent
 
-        latent_pair = [latent.clone(), latent.clone()]
+        coupled_latents = [latent.clone(), latent.clone()]
 
         for i, t in tqdm(enumerate(timesteps), total=len(timesteps)):
-            latent_pair = self.scheduler.noise_mixing_layer(x=latent_pair[0], y=latent_pair[1])
+            coupled_latents = self.scheduler.noise_mixing_layer(x=coupled_latents[0], y=coupled_latents[1])
 
             # j - model_input index, k - base index
             for j in range(2):
@@ -120,8 +114,8 @@ class Pipeline:
                     if i % 2 == 0:
                         k, j = j, k
 
-                model_input = latent_pair[j]
-                base = latent_pair[k]
+                model_input = coupled_latents[j]
+                base = coupled_latents[k]
 
                 latent_model_input = torch.cat([model_input] * 2)
 
@@ -137,9 +131,9 @@ class Pipeline:
                     timestep=t,
                 )
             
-                latent_pair[k] = model_input
+                coupled_latents[k] = model_input
 
-        return latent_pair
+        return coupled_latents
 
     
 

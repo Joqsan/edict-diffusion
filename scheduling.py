@@ -49,7 +49,6 @@ class EDICTScheduler:
         return [x, y]
 
     def get_alpha_and_beta(self, t):
-        t = int(t)
 
         alpha_prod = self.alphas_cumprod[t] if t >= 0 else self.final_alpha_cumprod
 
