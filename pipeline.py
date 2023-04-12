@@ -1,9 +1,11 @@
 import numpy as np
 import torch
-from diffusers import AutoencoderKL, DDIMScheduler, UNet2DConditionModel
+from diffusers import AutoencoderKL, UNet2DConditionModel
 from PIL import Image
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
+
+from scheduling import EDICTScheduler
 
 model_path_clip = "openai/clip-vit-large-patch14"
 model_path_diffusion = "CompVis/stable-diffusion-v1-4"
@@ -25,11 +27,18 @@ def preprocess(image):
 
 
 class Pipeline:
-    def __init__(self, p=0.93, leapfrog_steps=True, device="cuda") -> None:
-        self.p = p
+    def __init__(self, leapfrog_steps=True, device="cuda") -> None:
+        
         self.leapfrog_steps = leapfrog_steps
         self.device = device
 
+        self.scheduler = EDICTScheduler(
+            p=0.93,
+            beta_1=0.00085,
+            beta_T=0.012,
+            num_train_timesteps=1000
+        )
+        
         self.unet = UNet2DConditionModel.from_pretrained(
             model_path_diffusion,
             subfolder="unet",
@@ -49,15 +58,6 @@ class Pipeline:
             model_path_clip,
             torch_dtype=torch.float16
         ).double().to(device)
-
-        self.scheduler = DDIMScheduler(
-            beta_start=0.00085,
-            beta_end=0.012,
-            beta_schedule="scaled_linear",
-            num_train_timesteps=1000,
-            clip_sample=False,
-            set_alpha_to_one=False,
-        )
 
 
     def encode_prompt(self, prompt, negative_prompt=None):
@@ -89,55 +89,6 @@ class Pipeline:
 
         return torch.cat([embeds_uncond, embeds_cond])
 
-    def get_alpha_and_beta(self, t):
-        t = int(t)
-
-        alpha_prod = (
-            self.scheduler.alphas_cumprod[t]
-            if t >= 0
-            else self.scheduler.final_alpha_cumprod
-        )
-
-        return alpha_prod, 1 - alpha_prod
-
-    def denoise_step(
-        self,
-        base,
-        model_input,
-        model_output,
-        timestep,
-    ):
-        prev_timestep = timestep - self.scheduler.config.num_train_timesteps / self.scheduler.num_inference_steps
-
-        alpha_prod_t, beta_prod_t = self.get_alpha_and_beta(timestep)
-        alpha_prod_t_prev, beta_prod_t_prev = self.get_alpha_and_beta(prev_timestep)
-
-        a_t = (alpha_prod_t_prev / alpha_prod_t) ** 0.5
-        b_t = -a_t * (beta_prod_t ** 0.5) + beta_prod_t_prev ** 0.5
-        next_model_input = a_t * base + b_t * model_output
-
-        return model_input, next_model_input.to(base.dtype)
-
-
-    def noise_step(
-        self,
-        base,
-        model_input,
-        model_output,
-        timestep: int,
-    ):
-        prev_timestep = timestep - self.scheduler.config.num_train_timesteps / self.scheduler.num_inference_steps
-
-        alpha_prod_t, beta_prod_t = self.get_alpha_and_beta(timestep)
-        alpha_prod_t_prev, beta_prod_t_prev = self.get_alpha_and_beta(prev_timestep)
-
-        a_t = (alpha_prod_t_prev / alpha_prod_t) ** 0.5
-        b_t = -a_t * (beta_prod_t ** 0.5) + beta_prod_t_prev ** 0.5
-
-        next_model_input = (base - b_t * model_output) / a_t
-
-        return model_input, next_model_input.to(base.dtype)
-
     @torch.no_grad()
     def decode_latents(self, latents):
         # latents = 1 / self.vae.config.scaling_factor * latents
@@ -159,7 +110,7 @@ class Pipeline:
         latent_pair = [latent.clone(), latent.clone()]
 
         for i, t in tqdm(enumerate(timesteps), total=len(timesteps)):
-            latent_pair = self.noise_mixing_layer(x=latent_pair[0], y=latent_pair[1])
+            latent_pair = self.scheduler.noise_mixing_layer(x=latent_pair[0], y=latent_pair[1])
 
             # j - model_input index, k - base index
             for j in range(2):
@@ -179,7 +130,7 @@ class Pipeline:
                 noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                 noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-                base, model_input = self.noise_step(
+                base, model_input = self.scheduler.noise_step(
                     base=base,
                     model_input=model_input,
                     model_output=noise_pred,
@@ -190,17 +141,7 @@ class Pipeline:
 
         return latent_pair
 
-    def denoise_mixing_layer(self, x, y):
-        x = self.p * x + (1 - self.p) * y
-        y = self.p * y + (1 - self.p) * x
-
-        return [x, y]
-
-    def noise_mixing_layer(self, x, y):
-        y = (y - (1 - self.p) * x) / self.p
-        x = (x - (1 - self.p) * y) / self.p
-
-        return [x, y]
+    
 
     @torch.no_grad()
     def __call__(
@@ -217,7 +158,7 @@ class Pipeline:
         base_embeds = self.encode_prompt(base_prompt)
         target_embeds = self.encode_prompt(target_prompt)
 
-        self.scheduler.set_timesteps(steps)
+        self.scheduler.set_timesteps(steps, self.device)
 
         t_limit = steps - int(steps * strength)
         fwd_timesteps = self.scheduler.timesteps[t_limit:]
@@ -245,7 +186,7 @@ class Pipeline:
             
                 noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-                base, model_input = self.denoise_step(
+                base, model_input = self.scheduler.denoise_step(
                     base=base,
                     model_input=model_input,
                     model_output=noise_pred,
@@ -254,7 +195,7 @@ class Pipeline:
 
                 latent_pair[k] = model_input
 
-            latent_pair = self.denoise_mixing_layer(x=latent_pair[0], y=latent_pair[1])
+            latent_pair = self.scheduler.denoise_mixing_layer(x=latent_pair[0], y=latent_pair[1])
 
         # either one is fine
         final_latent = latent_pair[0]
