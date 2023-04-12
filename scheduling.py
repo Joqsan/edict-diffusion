@@ -14,6 +14,7 @@ class EDICTScheduler:
             
     ) -> None:
         self.p = p
+        self.num_train_timesteps = num_train_timesteps
 
         # scaled linear
         betas = torch.linspace(beta_1**0.5, beta_T**0.5, num_train_timesteps, dtype=torch.float32) ** 2
@@ -30,7 +31,7 @@ class EDICTScheduler:
     def set_timesteps(self, num_inference_steps, device):
 
         self.num_inference_steps = num_inference_steps
-        step_ratio = self.config.num_train_timesteps // self.num_inference_steps
+        step_ratio = self.num_train_timesteps // self.num_inference_steps
         
         timesteps = (np.arange(0, num_inference_steps) * step_ratio).round()[::-1].copy().astype(np.int64)
         self.timesteps = torch.from_numpy(timesteps).to(device)
@@ -50,7 +51,7 @@ class EDICTScheduler:
     def get_alpha_and_beta(self, t):
         t = int(t)
 
-        alpha_prod = self.scheduler.alphas_cumprod[t] if t >= 0 else self.scheduler.final_alpha_cumprod
+        alpha_prod = self.alphas_cumprod[t] if t >= 0 else self.final_alpha_cumprod
 
         return alpha_prod, 1 - alpha_prod
     
@@ -61,7 +62,7 @@ class EDICTScheduler:
         model_output,
         timestep: int,
     ):
-        prev_timestep = timestep - self.scheduler.config.num_train_timesteps / self.scheduler.num_inference_steps
+        prev_timestep = timestep - self.num_train_timesteps / self.num_inference_steps
 
         alpha_prod_t, beta_prod_t = self.get_alpha_and_beta(timestep)
         alpha_prod_t_prev, beta_prod_t_prev = self.get_alpha_and_beta(prev_timestep)
@@ -80,7 +81,7 @@ class EDICTScheduler:
         model_output,
         timestep,
     ):
-        prev_timestep = timestep - self.scheduler.config.num_train_timesteps / self.scheduler.num_inference_steps
+        prev_timestep = timestep - self.num_train_timesteps / self.num_inference_steps
 
         alpha_prod_t, beta_prod_t = self.get_alpha_and_beta(timestep)
         alpha_prod_t_prev, beta_prod_t_prev = self.get_alpha_and_beta(prev_timestep)
