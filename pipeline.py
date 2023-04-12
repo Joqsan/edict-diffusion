@@ -191,14 +191,12 @@ class Pipeline:
         return latent_pair
 
     def denoise_mixing_layer(self, x, y):
-        # Mixing layer (contraction) during generative process
         x = self.p * x + (1 - self.p) * y
         y = self.p * y + (1 - self.p) * x
 
         return [x, y]
 
     def noise_mixing_layer(self, x, y):
-        # Reverse mixing layer
         y = (y - (1 - self.p) * x) / self.p
         x = (x - (1 - self.p) * y) / self.p
 
