@@ -26,18 +26,7 @@ def preprocess(image):
         raise TypeError("Expected object of type PIL.Image.Image")
     return image
 
-# It doesn't match torchvision.transforms.functional.center_crop
-# but strangely using the latter produces bad result after denoising
-def manual_center_crop(im):
 
-    width, height = im.size
-    d = min(width, height)
-    left = (width - d) / 2
-    upper = (height - d) / 2
-    right = (width + d) / 2
-    lower = (height + d) / 2
-
-    return im.crop((left, upper, right, lower))
 
 
 class Pipeline:
@@ -177,12 +166,7 @@ class Pipeline:
         guidance_scale: float = 3.0,
         steps: int = 50,
         strength: float = 0.8,
-        center_crop_and_resize: bool = True,
     ):
-        
-        if center_crop_and_resize:
-            image = manual_center_crop(image)
-            image = image.resize((512, 512))
 
         image = preprocess(image)  # from PIL.Image to torch.Tensor
 
